@@ -1,0 +1,2123 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug Kutusu · GDG On Campus Biruni University</title>
+<!--
+  DEBUG KUTUSU — Ödül Çekme Uygulaması
+  GDG On Campus Biruni University · Stand Haftası
+
+  Tek dosya: HTML + CSS + JS. Harici kütüphane, CDN, görsel veya ses dosyası yok.
+  Çift tıklanarak (file://) internetsiz çalışır.
+
+  ŞARTNAMEDE BELİRSİZ KALAN NOKTALAR İÇİN VERİLEN KARARLAR:
+  1. Çekiliş, animasyon BAŞLAMADAN önce kesinleşir ve stoktan düşülür. Böylece animasyon
+     sırasında sayfa yenilense bile stok tutarlı kalır; yanlışlık olursa "Geri Al" kullanılır.
+  2. "Geri Al" yalnızca EN SON çekilişi bir kez geri alır. Art arda Ctrl+Z ile eski
+     (gerçekten verilmiş) çekilişlerin yanlışlıkla silinmesini önlemek için, bir geri almadan
+     sonra tekrar geri alabilmek için yeni bir çekiliş yapılmış olmalıdır.
+  3. Olasılıklar ağırlık olarak kullanılır (toplamı 100 olmasa da çekiliş doğru oranda çalışır).
+     Yönetici panelinde değişiklik anında kaydedilir; toplam 100 değilse uyarı gösterilir ve
+     panel kapatılırken (veya "100'e normalize et" butonuyla) otomatik olarak 100'e ölçeklenir.
+  4. "Stokları varsayılana döndür": ödül listesini (isim, emoji, stok) CONFIG'teki haline getirir.
+     Panelden eklenen ödüller silinir. Olasılıklar ve geçmiş korunur.
+  5. "Tüm verileri sıfırla": stoklar, olasılıklar, geçmiş ve ses ayarı dahil her şeyi siler.
+  6. Test simülasyonu stoğu DEĞİŞTİRMEZ: mevcut stok durumuyla 1000 bağımsız çekiliş yapar
+     ve kart türü dağılımını beklenen (stoğa göre normalize edilmiş) olasılıklarla karşılaştırır.
+  7. CSV indirmesi tüm geçmişi içerir (panelde son 50 görünür). Türkçe Excel'de düzgün
+     açılması için ayraç ";" ve UTF-8 BOM kullanılır.
+  8. Yönetici paneli Ctrl+Shift+A dışında, sağ üstteki soluk ⚙ butonuyla da açılabilir
+     (dokunmatik ekranlar için). Panel açıkken çekiliş kısayolları ve ekran tıklaması devre dışıdır.
+  9. Mac'te Ctrl+Z'ye ek olarak Cmd+Z de geri alma yapar.
+-->
+<style>
+  /* ---------- Temel değişkenler ---------- */
+  :root {
+    --blue: #4285F4;
+    --red: #EA4335;
+    --yellow: #FBBC05;
+    --green: #34A853;
+    --bg: #F8F9FA;
+    --text: #202124;
+    --muted: #5f6368;
+    --orange: #fb8c00;
+    /* Kart yüksekliği her şeyin ölçüsünü belirler (responsive) */
+    --card-h: min(54vh, 120vw);
+    --card-w: calc(var(--card-h) * 5 / 7);
+    --box-w: min(calc(var(--card-h) * 0.8), 82vw);
+    --tier: var(--blue);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  button { font-family: inherit; }
+
+  /* ---------- Üst başlık ---------- */
+  header.top {
+    padding: 2.4vh 16px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  header.top h1 {
+    margin: 0;
+    font-size: clamp(18px, 3.4vh, 42px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-align: center;
+  }
+
+  /* ---------- GDG logosu (CSS ile çizilmiş < > işaretleri) ---------- */
+  .gdg-logo {
+    position: relative;
+    width: 6em;
+    height: 3.6em;
+    flex: 0 0 auto;
+  }
+  .gdg-logo i {
+    position: absolute;
+    width: 3em;
+    height: 0.9em;
+    border-radius: 999px;
+  }
+  .gdg-logo i:nth-child(1) { left: 0.1em;  top: 0.85em; background: var(--red);    transform: rotate(-32deg); }
+  .gdg-logo i:nth-child(2) { left: 0.1em;  top: 1.95em; background: var(--blue);   transform: rotate(32deg); }
+  .gdg-logo i:nth-child(3) { right: 0.1em; top: 0.85em; background: var(--green);  transform: rotate(32deg); }
+  .gdg-logo i:nth-child(4) { right: 0.1em; top: 1.95em; background: var(--yellow); transform: rotate(-32deg); }
+  header.top .gdg-logo { font-size: clamp(6px, 0.95vh, 11px); }
+
+  /* ---------- Sahne ---------- */
+  main#stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2vh;
+    padding: 0 16px;
+    cursor: pointer;
+  }
+  .centerpiece {
+    position: relative;
+    width: 100%;
+    height: var(--card-h);
+    flex: 0 0 auto;
+  }
+
+  /* ---------- Debug Kutusu (CSS çizimi) ---------- */
+  .box-wrap {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: var(--box-w);
+    height: calc(var(--box-w) * 0.86);
+    z-index: 2;
+    pointer-events: none;
+  }
+  .box-wrap.breathing { animation: breathe 3s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.045); }
+  }
+  .box {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-origin: 50% 100%;
+  }
+  .lid {
+    position: absolute;
+    left: -4%;
+    width: 108%;
+    top: 0;
+    height: 22%;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #3367d6 0 25%, #d33b2c 25% 50%, #f2a600 50% 75%, #2d8f47 75%);
+    box-shadow: 0 7px 0 rgba(0,0,0,0.13), 0 10px 22px rgba(0,0,0,0.12);
+    z-index: 2;
+    transform-origin: 0% 100%;
+  }
+  .lid::after { /* kurdele */
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 12%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.92);
+  }
+  .box-body {
+    position: absolute;
+    top: 20%;
+    left: 0;
+    right: 0;
+    bottom: 5%;
+    border-radius: 0 0 20px 20px;
+    overflow: hidden;
+    display: grid;
+    grid-template: 1fr 1fr / 1fr 1fr;
+    box-shadow: inset 0 -12px 0 rgba(0,0,0,0.08), 0 18px 40px rgba(0,0,0,0.18);
+  }
+  .q { position: relative; isolation: isolate; font-size: calc(var(--box-w) * 0.028); }
+  .q1 { background: var(--blue); }
+  .q2 { background: var(--red); }
+  .q3 { background: var(--yellow); }
+  .q4 { background: var(--green); }
+  .box-label {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 64%;
+    height: 40%;
+    background: #fff;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    font-weight: 900;
+    font-size: calc(var(--box-w) * 0.085);
+    line-height: 1.02;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    box-shadow: 0 6px 0 rgba(0,0,0,0.12);
+  }
+  .box-label small {
+    display: block;
+    font-size: 0.42em;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 700;
+    margin-top: 0.2em;
+  }
+  .box-floor {
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    bottom: -2%;
+    height: 8%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0.2), rgba(0,0,0,0) 70%);
+    z-index: -1;
+  }
+
+  /* Küçük böcek (bug) çizimi: gövde + kafa + bacaklar */
+  .bug {
+    position: absolute;
+    width: 1.6em;
+    height: 2em;
+    border-radius: 50% 50% 46% 46%;
+    background: linear-gradient(90deg, rgba(255,255,255,0.95) 46%, rgba(0,0,0,0.22) 46% 54%, rgba(255,255,255,0.95) 54%);
+  }
+  .bug::before { /* bacaklar */
+    content: "";
+    position: absolute;
+    left: -0.45em;
+    right: -0.45em;
+    top: 0.3em;
+    height: 1.35em;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.95) 0 0.15em, transparent 0.15em 0.55em);
+    z-index: -1;
+  }
+  .bug::after { /* kafa + antenler */
+    content: "";
+    position: absolute;
+    left: 0.42em;
+    top: -0.5em;
+    width: 0.76em;
+    height: 0.62em;
+    border-radius: 50% 50% 40% 40%;
+    background: rgba(255,255,255,0.95);
+    box-shadow: -0.32em -0.32em 0 -0.22em rgba(255,255,255,0.95), 0.32em -0.32em 0 -0.22em rgba(255,255,255,0.95);
+  }
+  .bug.sm { font-size: 0.65em; }
+
+  /* ---------- Kart ---------- */
+  .card-shift {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .card {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: var(--card-w);
+    height: var(--card-h);
+    opacity: 0;
+    perspective: 1400px;
+  }
+  .card::before { /* sonuçta kartın arkasındaki parıltı */
+    content: "";
+    position: absolute;
+    inset: -8%;
+    border-radius: 40px;
+    background: radial-gradient(ellipse at center, var(--tier), transparent 68%);
+    opacity: 0;
+    z-index: -1;
+    filter: blur(10px);
+  }
+  .card.glow::before { animation: glowPulse 1.8s ease-in-out infinite; }
+  @keyframes glowPulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.97); }
+    50%      { opacity: 0.7;  transform: scale(1.04); }
+  }
+  .card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+  }
+  .face {
+    position: absolute;
+    inset: 0;
+    border-radius: calc(var(--card-h) * 0.045);
+    overflow: hidden;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    box-shadow: 0 22px 50px rgba(0,0,0,0.25), 0 4px 10px rgba(0,0,0,0.12);
+  }
+  /* Arka yüz: dört Google renginden desen + GDG */
+  .back {
+    background: repeating-linear-gradient(45deg,
+      var(--blue) 0 calc(var(--card-h) * 0.03),
+      var(--red) calc(var(--card-h) * 0.03) calc(var(--card-h) * 0.06),
+      var(--yellow) calc(var(--card-h) * 0.06) calc(var(--card-h) * 0.09),
+      var(--green) calc(var(--card-h) * 0.09) calc(var(--card-h) * 0.12));
+    border: calc(var(--card-h) * 0.025) solid #fff;
+    display: grid;
+    place-items: center;
+  }
+  .back-panel {
+    background: #fff;
+    border-radius: calc(var(--card-h) * 0.035);
+    width: 74%;
+    padding: 9% 0 7%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: calc(var(--card-h) * 0.02);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+  }
+  .back-panel .gdg-logo { font-size: calc(var(--card-h) * 0.03); }
+  .back-text {
+    font-size: calc(var(--card-h) * 0.1);
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    line-height: 1;
+  }
+  .back-text span:nth-child(1) { color: var(--blue); }
+  .back-text span:nth-child(2) { color: var(--red); }
+  .back-text span:nth-child(3) { color: var(--green); }
+  .back-sub {
+    font-size: calc(var(--card-h) * 0.028);
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+  }
+  /* Ön yüz */
+  .front {
+    transform: rotateY(180deg);
+    background: radial-gradient(circle at 50% 45%, #fff 0 55%, #f1f3f4 100%);
+    border: calc(var(--card-h) * 0.022) solid var(--tier);
+    display: flex;
+    flex-direction: column;
+  }
+  .front-top {
+    background: var(--tier);
+    color: #fff;
+    font-weight: 900;
+    font-size: calc(var(--card-h) * 0.058);
+    letter-spacing: 0.06em;
+    text-align: center;
+    padding: 0.45em 0.3em 0.5em;
+  }
+  .front-emoji {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    font-size: calc(var(--card-h) * 0.25);
+    line-height: 1;
+  }
+  .front-name {
+    font-size: calc(var(--card-h) * 0.072);
+    font-weight: 900;
+    text-align: center;
+    padding: 0 0.4em 0.75em;
+    line-height: 1.1;
+  }
+  .front-name.small { font-size: calc(var(--card-h) * 0.04); color: #5d4300; }
+  /* Altın Bilet ön yüzü: parlayan altın */
+  .front.tier-altin {
+    background: linear-gradient(135deg, #fff6cf 0%, #ffd54f 30%, #FBBC05 50%, #ffe082 68%, #e8a400 100%);
+    border-color: #c98a00;
+  }
+  .front.tier-altin .front-top { background: #202124; color: #FBBC05; }
+  .front.tier-altin::after { /* ışıltı bandı */
+    content: "";
+    position: absolute;
+    top: -20%;
+    bottom: -20%;
+    width: 35%;
+    left: -60%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent);
+    transform: skewX(-20deg);
+    animation: sheen 2.2s ease-in-out infinite;
+  }
+  @keyframes sheen {
+    0%   { left: -60%; }
+    60%, 100% { left: 130%; }
+  }
+
+  /* ---------- Altın Bilet rulet şeridi ---------- */
+  .reel {
+    --reel-h: calc(var(--card-h) * 0.24);
+    --cell-w: calc(var(--card-h) * 0.25);
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0 auto;
+    width: min(calc(var(--cell-w) * 5), 92vw);
+    height: var(--reel-h);
+    z-index: 5;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+  }
+  .reel.show { opacity: 1; transform: none; }
+  .reel-window {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+    background: #202124;
+    border: 4px solid var(--yellow);
+    box-shadow: 0 0 34px rgba(251,188,5,0.6);
+    overflow: hidden;
+  }
+  .reel-viewport {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  }
+  .reel-strip { display: flex; height: 100%; will-change: transform; }
+  .reel-cell {
+    flex: 0 0 var(--cell-w);
+    width: var(--cell-w);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 800;
+    border-right: 2px solid rgba(255,255,255,0.08);
+  }
+  .reel-cell .e { font-size: calc(var(--reel-h) * 0.42); line-height: 1.1; }
+  .reel-cell .n { font-size: calc(var(--reel-h) * 0.15); white-space: nowrap; }
+  .reel-cell.win { background: rgba(251,188,5,0.32); color: #FBBC05; }
+  .reel-marker::before, .reel-marker::after { /* ortadaki işaret okları */
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 12px solid transparent;
+    z-index: 2;
+  }
+  .reel-marker::before { top: -6px; border-top-color: var(--yellow); }
+  .reel-marker::after  { bottom: -6px; border-bottom-color: var(--yellow); }
+
+  /* ---------- Alt alan: yazılar ve butonlar ---------- */
+  .below {
+    min-height: 20vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1.6vh;
+    text-align: center;
+  }
+  .tagline {
+    margin: 0;
+    font-size: clamp(18px, 3.4vh, 42px);
+    font-weight: 800;
+  }
+  .tagline.empty { color: #d93025; }
+  .announce {
+    margin: 0;
+    font-size: clamp(20px, 4.2vh, 52px);
+    font-weight: 900;
+    line-height: 1.1;
+  }
+  .announce.gold {
+    font-size: clamp(24px, 5.2vh, 64px);
+    color: #b07d00;
+    text-shadow: 0 2px 0 #fff3c4, 0 0 24px rgba(251,188,5,0.6);
+  }
+  .actions { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    border: 0;
+    border-radius: 999px;
+    font-weight: 900;
+    cursor: pointer;
+    font-size: clamp(16px, 2.7vh, 32px);
+    padding: 0.55em 1.4em;
+    transition: transform 0.08s, box-shadow 0.08s, opacity 0.2s;
+  }
+  .btn:active:not(:disabled) { transform: translateY(4px); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--blue); color: #fff; box-shadow: 0 6px 0 #2a5bb8; }
+  .btn-primary:active:not(:disabled) { box-shadow: 0 2px 0 #2a5bb8; }
+  .btn-ghost { background: #fff; color: var(--text); box-shadow: 0 6px 0 #dadce0, inset 0 0 0 3px #dadce0; }
+  .btn-xl {
+    font-size: clamp(24px, 4.6vh, 56px);
+    padding: 0.45em 1.8em;
+    letter-spacing: 0.04em;
+  }
+  .btn-xl:not(:disabled) { animation: btnPulse 2.4s ease-in-out infinite; }
+  @keyframes btnPulse {
+    0%, 100% { box-shadow: 0 6px 0 #2a5bb8, 0 0 0 0 rgba(66,133,244,0.45); }
+    50%      { box-shadow: 0 6px 0 #2a5bb8, 0 0 0 16px rgba(66,133,244,0); }
+  }
+  .countdown {
+    width: min(320px, 60vw);
+    height: 6px;
+    border-radius: 999px;
+    background: #e3e5e8;
+    overflow: hidden;
+  }
+  .countdown-bar { height: 100%; background: var(--blue); transform-origin: left center; }
+
+  /* Ekran durumlarına göre göster/gizle */
+  body:not([data-screen="idle"]) #tagline,
+  body:not([data-screen="idle"]) #idleActions { display: none; }
+  body:not([data-screen="result"]) #resultActions,
+  body:not([data-screen="result"]) #countdown { display: none; }
+  body[data-screen="idle"] #announce { display: none; }
+
+  /* ---------- Köşe kontrolleri ve ipucu ---------- */
+  .hud {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    display: flex;
+    gap: 6px;
+    z-index: 40;
+  }
+  .hud button {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 0;
+    background: transparent;
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0.3;
+    transition: opacity 0.2s, background 0.2s;
+  }
+  .hud button:hover { opacity: 1; background: #e8eaed; }
+  .hint {
+    position: fixed;
+    left: 14px;
+    bottom: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    opacity: 0.55;
+    z-index: 40;
+    pointer-events: none;
+  }
+
+  /* ---------- Konfeti, altın parıltı, bildirimler ---------- */
+  #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 60; }
+  #goldFlash {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    opacity: 0;
+    background: radial-gradient(circle at 50% 45%, rgba(255,224,120,0.9), rgba(251,188,5,0.4) 40%, rgba(251,188,5,0) 75%);
+  }
+  #toasts {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    z-index: 200;
+    pointer-events: none;
+  }
+  .toast {
+    background: #202124;
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    animation: toastIn 0.25s ease-out;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .toast.warn { background: #d93025; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }
+
+  /* ---------- Yönetici paneli ---------- */
+  #backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(32,33,36,0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    z-index: 90;
+  }
+  #admin {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: min(520px, 100vw);
+    background: #fff;
+    box-shadow: -10px 0 40px rgba(0,0,0,0.2);
+    transform: translateX(105%);
+    transition: transform 0.35s cubic-bezier(.3,.8,.3,1);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    font-size: 14px;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: default;
+  }
+  body.admin-open #admin { transform: none; }
+  body.admin-open #backdrop { opacity: 1; pointer-events: auto; }
+  .admin-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #e8eaed;
+  }
+  .admin-head h2 { margin: 0; font-size: 18px; }
+  .admin-head button { border: 0; background: transparent; font-size: 26px; cursor: pointer; line-height: 1; padding: 4px 8px; border-radius: 8px; }
+  .admin-head button:hover { background: #f1f3f4; }
+  .admin-body { overflow-y: auto; padding: 6px 18px 40px; flex: 1; }
+  .admin-body section { padding: 14px 0 18px; border-bottom: 1px solid #f1f3f4; }
+  .admin-body h3 { margin: 0 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .admin-body p.note { margin: 6px 0; color: var(--muted); font-size: 12.5px; }
+  .abtn {
+    border: 1px solid #dadce0;
+    background: #fff;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .abtn:hover { background: #f1f3f4; }
+  .abtn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .abtn.danger { color: #d93025; border-color: #f4c7c3; }
+  .abtn.danger:hover { background: #fdecea; }
+  .row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--tier); flex: 0 0 auto; }
+
+  .tier-block { margin-bottom: 14px; }
+  .tier-head { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 6px; }
+  .tier-head .tier-total { margin-left: auto; font-weight: 600; color: var(--muted); font-size: 12.5px; }
+  .tier-head .tier-total.out { color: #d93025; }
+  .item-row {
+    display: grid;
+    grid-template-columns: 2.8em 1fr 2.3em 4.4em 2.3em 2.3em;
+    gap: 5px;
+    align-items: center;
+    padding: 4px 6px;
+    border-radius: 8px;
+    border-left: 4px solid transparent;
+    margin-bottom: 4px;
+  }
+  .item-row.low { background: #fff3e0; border-left-color: var(--orange); }
+  .item-row.out { background: #fdecea; border-left-color: #d93025; }
+  .item-row.low .stock-in { color: #e65100; font-weight: 800; }
+  .item-row.out .stock-in { color: #d93025; font-weight: 800; }
+  .item-row input {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    padding: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+  }
+  .item-row .emoji-in { text-align: center; font-size: 17px; padding: 3px; }
+  .item-row .stock-in { text-align: center; }
+  .item-row button {
+    border: 1px solid #dadce0;
+    background: #fff;
+    border-radius: 6px;
+    padding: 6px 0;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .item-row button:hover { background: #f1f3f4; }
+  .add-item { font-size: 12.5px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .legend .l-low::before { background: var(--orange); }
+  .legend .l-out::before { background: #d93025; }
+
+  .chance-row { display: grid; grid-template-columns: 12px 1fr 5.5em 1em 7.5em; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .chance-row input { border: 1px solid #dadce0; border-radius: 6px; padding: 6px; font-size: 14px; text-align: right; width: 100%; font-family: inherit; }
+  .chance-row input.invalid { border-color: #d93025; background: #fdecea; }
+  .chance-row .eff { font-size: 12px; color: var(--muted); text-align: right; }
+  .chance-sum { font-weight: 700; margin: 8px 0 4px; }
+  .chance-sum.warn { color: #d93025; }
+  .chance-sum.ok { color: #188038; }
+
+  table.mini { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  table.mini th, table.mini td { padding: 5px 6px; border-bottom: 1px solid #f1f3f4; text-align: left; }
+  table.mini th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  table.mini td.num, table.mini th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .stat-card { background: #f8f9fa; border-radius: 10px; padding: 10px 12px; }
+  .stat-card b { display: block; font-size: 26px; }
+  .stat-card span { color: var(--muted); font-size: 12px; }
+  .bar-row { display: grid; grid-template-columns: 7.5em 1fr 5.5em; gap: 8px; align-items: center; margin: 5px 0; font-size: 13px; }
+  .bar { height: 10px; background: #f1f3f4; border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--tier); border-radius: 999px; }
+  .history-wrap { max-height: 320px; overflow-y: auto; margin-top: 8px; }
+  .check-ok { color: #188038; font-weight: 700; }
+  .check-bad { color: #d93025; font-weight: 700; }
+</style>
+</head>
+<body data-screen="idle">
+
+<header class="top">
+  <div class="gdg-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <h1 id="orgTitle">GDG On Campus Biruni University</h1>
+</header>
+
+<main id="stage">
+  <div class="centerpiece" id="centerpiece">
+    <!-- Kapalı kutu -->
+    <div class="box-wrap breathing" id="boxWrap">
+      <div class="box" id="box">
+        <div class="lid" id="lid"></div>
+        <div class="box-body">
+          <div class="q q1">
+            <i class="bug" style="top:16%;left:12%;transform:rotate(-25deg)"></i>
+            <i class="bug sm" style="top:58%;left:30%;transform:rotate(40deg)"></i>
+          </div>
+          <div class="q q2">
+            <i class="bug" style="top:18%;right:14%;transform:rotate(30deg)"></i>
+            <i class="bug sm" style="top:60%;right:34%;transform:rotate(-50deg)"></i>
+          </div>
+          <div class="q q3">
+            <i class="bug" style="bottom:20%;left:15%;transform:rotate(200deg)"></i>
+            <i class="bug sm" style="top:16%;left:42%;transform:rotate(120deg)"></i>
+          </div>
+          <div class="q q4">
+            <i class="bug" style="bottom:18%;right:13%;transform:rotate(150deg)"></i>
+            <i class="bug sm" style="top:18%;right:42%;transform:rotate(-140deg)"></i>
+          </div>
+          <div class="box-label"><div>DEBUG<br>KUTUSU<small>&lt;/&gt; sürpriz ödül</small></div></div>
+        </div>
+        <div class="box-floor"></div>
+      </div>
+    </div>
+
+    <!-- Kart (arka yüz GDG, ön yüz ödül) -->
+    <div class="card-shift" id="cardShift">
+      <div class="card" id="card">
+        <div class="card-inner" id="cardInner">
+          <div class="face back">
+            <div class="back-panel">
+              <div class="gdg-logo"><i></i><i></i><i></i><i></i></div>
+              <div class="back-text"><span>G</span><span>D</span><span>G</span></div>
+              <div class="back-sub">DEBUG KUTUSU</div>
+            </div>
+          </div>
+          <div class="face front" id="cardFront">
+            <div class="front-top" id="frontTier"></div>
+            <div class="front-emoji" id="frontEmoji"></div>
+            <div class="front-name" id="frontName"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Altın Bilet rulet şeridi -->
+    <div class="reel" id="reel">
+      <div class="reel-window">
+        <div class="reel-viewport" id="reelViewport"><div class="reel-strip" id="reelStrip"></div></div>
+      </div>
+      <div class="reel-marker"></div>
+    </div>
+  </div>
+
+  <div class="below">
+    <p class="tagline" id="tagline">Oyunu kazandın mı? Kartını çek!</p>
+    <p class="announce" id="announce"></p>
+    <div class="actions" id="idleActions">
+      <button class="btn btn-primary btn-xl" id="drawBtn">KART ÇEK</button>
+    </div>
+    <div class="actions" id="resultActions">
+      <button class="btn btn-primary" id="againBtn">Yeni Kart Çek</button>
+      <button class="btn btn-ghost" id="undoBtn">↩ Geri Al</button>
+    </div>
+    <div class="countdown" id="countdown"><div class="countdown-bar" id="countdownBar"></div></div>
+  </div>
+</main>
+
+<div class="hud">
+  <button id="muteBtn" title="Ses aç/kapat (M)">🔊</button>
+  <button id="fsBtn" title="Tam ekran (F)">⛶</button>
+  <button id="adminBtn" title="Yönetici paneli (Ctrl+Shift+A)">⚙️</button>
+</div>
+<div class="hint">Boşluk/Enter: kart çek · Ctrl+Z: geri al · F: tam ekran · M: ses · Ctrl+Shift+A: panel</div>
+
+<canvas id="confetti"></canvas>
+<div id="goldFlash"></div>
+<div id="toasts"></div>
+<div id="backdrop"></div>
+
+<aside id="admin" aria-label="Yönetici paneli">
+  <div class="admin-head">
+    <h2>⚙️ Yönetici Paneli</h2>
+    <button id="adminClose" title="Kapat (Esc)">×</button>
+  </div>
+  <div class="admin-body">
+    <section>
+      <h3>Stok yönetimi</h3>
+      <div class="legend"><span class="l-low">Stok ≤ <span id="lowThr">5</span></span><span class="l-out">Bitti</span></div>
+      <div id="stockList"></div>
+    </section>
+    <section>
+      <h3>Olasılıklar (%)</h3>
+      <div id="chanceList"></div>
+      <div class="chance-sum" id="chanceSum"></div>
+      <p class="note">Ondalıklı değer girilebilir (ör. 2,5). "Şu an" sütunu, stoğu biten türler çıkarıldıktan sonraki gerçek olasılıktır.</p>
+      <div class="row-btns"><button class="abtn" id="normalizeBtn">100'e normalize et</button></div>
+    </section>
+    <section>
+      <h3>Test simülasyonu</h3>
+      <p class="note">Stoğu etkilemeden <span id="simN">1000</span> çekiliş simüle eder ve kart türü dağılımını beklenen olasılıklarla karşılaştırır.</p>
+      <div class="row-btns"><button class="abtn primary" id="simBtn">Simülasyonu çalıştır</button></div>
+      <div id="simResult"></div>
+    </section>
+    <section>
+      <h3>İstatistik</h3>
+      <div id="stats"></div>
+    </section>
+    <section>
+      <h3>Çekiliş geçmişi</h3>
+      <div class="row-btns"><button class="abtn" id="csvBtn">⬇ CSV olarak indir</button></div>
+      <div class="history-wrap" id="historyList"></div>
+    </section>
+    <section>
+      <h3>Sıfırlama</h3>
+      <div class="row-btns">
+        <button class="abtn danger" id="resetStockBtn">Stokları varsayılana döndür</button>
+        <button class="abtn danger" id="resetAllBtn">Tüm verileri sıfırla</button>
+      </div>
+      <p class="note">Kalıcı varsayılanları değiştirmek için index.html başındaki CONFIG nesnesini düzenleyin.</p>
+    </section>
+  </div>
+</aside>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   CONFIG — Tüm ayarlanabilir değerler burada.
+   Ödüller, olasılıklar (ondalıklı), stoklar, süreler ve metinler.
+   Panelden yapılan değişiklikler localStorage'a yazılır; CONFIG varsayılandır.
+   ===================================================================== */
+const CONFIG = {
+  tiers: [
+    { id: "kucuk", name: "Küçük Ödül", color: "#4285F4", chance: 70,
+      items: [ { name: "Atıştırmalık", emoji: "🍫", stock: 100 },
+               { name: "Sticker",      emoji: "⭐", stock: 100 } ] },
+    { id: "orta",  name: "Orta Ödül",  color: "#34A853", chance: 25,
+      items: [ { name: "Kalem",  emoji: "✏️", stock: 40 },
+               { name: "Çakmak", emoji: "🔥", stock: 40 } ] },
+    { id: "buyuk", name: "Büyük Ödül", color: "#EA4335", chance: 2.5,
+      items: [ { name: "Defter", emoji: "📒", stock: 20 } ] },
+    { id: "altin", name: "Altın Bilet", color: "#FBBC05", chance: 2.5,
+      poolFrom: ["orta", "buyuk"] }   // kendi ödülü yok, bu türlerden seçer
+  ],
+  settings: {
+    orgName: "GDG On Campus Biruni University",
+    tagline: "Oyunu kazandın mı? Kartını çek!",
+    goldTicketEmoji: "🎟️",
+    autoReturnSeconds: 15,     // sonuç ekranından bekleme ekranına otomatik dönüş
+    lowStockThreshold: 5,      // bu sayı ve altı panelde turuncu görünür
+    historyListSize: 50,       // panelde gösterilen son çekiliş sayısı
+    simulationCount: 1000,     // test simülasyonundaki çekiliş sayısı
+    maxStoredHistory: 20000,   // localStorage'da tutulan en fazla çekiliş kaydı
+    storageKey: "gdg-debug-kutusu-v1"
+  },
+  // Animasyon süreleri (ms)
+  timing: {
+    shake: 1200,
+    lid: 450,
+    fly: 750,
+    flip: 750,
+    goldPause: 1100,
+    reel: 3400
+  }
+};
+
+/* ---------- Küçük yardımcılar ---------- */
+const $ = (sel) => document.querySelector(sel);
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+// Kriptografik rastgele sayı [0, 1) — yoksa Math.random
+function rand() {
+  try {
+    const a = new Uint32Array(1);
+    crypto.getRandomValues(a);
+    return a[0] / 4294967296;
+  } catch (e) {
+    return Math.random();
+  }
+}
+function uid() {
+  return "i" + Date.now().toString(36) + Math.floor(rand() * 1e6).toString(36);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmt(n, d = 2) {
+  return Number(n).toLocaleString("tr-TR", { maximumFractionDigits: d });
+}
+function upperTR(s) {
+  return String(s).toLocaleUpperCase("tr-TR");
+}
+// "2,5" veya "2.5" -> 2.5 ; geçersizse NaN
+function parseDecimal(str) {
+  const s = String(str).trim().replace(",", ".");
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(s)) return NaN;
+  return parseFloat(s);
+}
+
+/* =====================================================================
+   DURUM (STATE) ve localStorage
+   ===================================================================== */
+function defaultItems(configTier) {
+  return (configTier.items || []).map((it, i) => ({
+    id: configTier.id + "-" + i,
+    name: it.name,
+    emoji: it.emoji,
+    stock: it.stock
+  }));
+}
+function defaultState() {
+  return {
+    version: 1,
+    tiers: CONFIG.tiers.map((t) => {
+      const base = { id: t.id, name: t.name, color: t.color, chance: t.chance };
+      if (t.poolFrom) base.poolFrom = t.poolFrom.slice();
+      else base.items = defaultItems(t);
+      return base;
+    }),
+    history: [],     // { t, tier, itemId, itemName, emoji }
+    undoable: false,
+    muted: false
+  };
+}
+function sanitizeItem(it) {
+  return {
+    id: String(it.id || uid()),
+    name: String(it.name ?? "Ödül"),
+    emoji: String(it.emoji ?? "🎁"),
+    stock: Math.max(0, Math.floor(Number(it.stock) || 0))
+  };
+}
+// Kayıtlı veriyi okur; tür listesi her zaman CONFIG'ten gelir (isim/renk CONFIG'e sadık kalır)
+function loadState() {
+  let saved = null;
+  try {
+    const raw = localStorage.getItem(CONFIG.settings.storageKey);
+    if (raw) saved = JSON.parse(raw);
+  } catch (e) { saved = null; }
+  if (!saved || !Array.isArray(saved.tiers)) return defaultState();
+
+  const tiers = CONFIG.tiers.map((ct) => {
+    const st = saved.tiers.find((t) => t && t.id === ct.id);
+    const chance = st && Number.isFinite(Number(st.chance)) && Number(st.chance) >= 0 ? Number(st.chance) : ct.chance;
+    const base = { id: ct.id, name: ct.name, color: ct.color, chance };
+    if (ct.poolFrom) base.poolFrom = ct.poolFrom.slice();
+    else base.items = st && Array.isArray(st.items) ? st.items.map(sanitizeItem) : defaultItems(ct);
+    return base;
+  });
+  return {
+    version: 1,
+    tiers,
+    history: Array.isArray(saved.history) ? saved.history.filter((h) => h && h.t && h.tier) : [],
+    undoable: !!saved.undoable,
+    muted: !!saved.muted
+  };
+}
+let storageWarned = false;
+function saveState() {
+  try {
+    localStorage.setItem(CONFIG.settings.storageKey, JSON.stringify(state));
+  } catch (e) {
+    if (!storageWarned) {
+      storageWarned = true;
+      toast("⚠️ Veriler kaydedilemiyor (tarayıcı depolamaya izin vermiyor)", "warn");
+    }
+  }
+}
+
+let state = loadState();
+
+/* =====================================================================
+   ÇEKİLİŞ MANTIĞI
+   ===================================================================== */
+function getTier(id) { return state.tiers.find((t) => t.id === id); }
+
+// Bir türün çekilişe girebilecek ödülleri (Altın Bilet için havuz türlerinin ödülleri)
+function tierItems(tier) {
+  if (tier.poolFrom) {
+    return tier.poolFrom.flatMap((id) => (getTier(id) && getTier(id).items) || []);
+  }
+  return tier.items || [];
+}
+function findItem(itemId) {
+  for (const t of state.tiers) {
+    if (!t.items) continue;
+    const it = t.items.find((i) => i.id === itemId);
+    if (it) return it;
+  }
+  return null;
+}
+function tierOfItem(itemId) {
+  return state.tiers.find((t) => t.items && t.items.some((i) => i.id === itemId)) || null;
+}
+// Stoğu olan ve olasılığı > 0 olan türler
+function availableTiers() {
+  return state.tiers.filter((t) => t.chance > 0 && tierItems(t).some((i) => i.stock > 0));
+}
+// Ağırlıklı rastgele seçim
+function weightedPick(list, weightFn) {
+  const total = list.reduce((s, x) => s + Math.max(0, weightFn(x)), 0);
+  if (total <= 0) return null;
+  let r = rand() * total;
+  for (const x of list) {
+    const w = Math.max(0, weightFn(x));
+    if (w <= 0) continue;
+    r -= w;
+    if (r < 0) return x;
+  }
+  // Kayan nokta artığı için: son pozitif ağırlıklı eleman
+  for (let i = list.length - 1; i >= 0; i--) if (weightFn(list[i]) > 0) return list[i];
+  return null;
+}
+// 1) Kart türü olasılığa göre (biten türler çıkar, kalanlar oranını koruyarak normalize olur)
+// 2) Türün içinden ödül kalan stoğa göre ağırlıklı seçilir
+function pickDraw() {
+  const tier = weightedPick(availableTiers(), (t) => t.chance);
+  if (!tier) return null;
+  const item = weightedPick(tierItems(tier).filter((i) => i.stock > 0), (i) => i.stock);
+  if (!item) return null;
+  return { tier, item };
+}
+// Gerçek çekiliş: stoktan düşer, geçmişe yazar, kaydeder
+function commitDraw() {
+  const d = pickDraw();
+  if (!d) return null;
+  d.item.stock -= 1;
+  state.history.push({ t: Date.now(), tier: d.tier.id, itemId: d.item.id, itemName: d.item.name, emoji: d.item.emoji });
+  const max = CONFIG.settings.maxStoredHistory;
+  if (state.history.length > max) state.history.splice(0, state.history.length - max);
+  state.undoable = true;
+  saveState();
+  return d;
+}
+// Son çekilişi geri al: geçmişten sil, stoğu geri yükle
+function undoLast() {
+  if (!state.undoable || !state.history.length) return null;
+  const rec = state.history.pop();
+  const item = findItem(rec.itemId);
+  if (item) item.stock += 1;
+  state.undoable = false;
+  saveState();
+  return { rec, restored: !!item };
+}
+// Şu anki gerçek olasılıklar (yüzde)
+function effectiveChances() {
+  const av = availableTiers();
+  const sum = av.reduce((s, t) => s + t.chance, 0);
+  const out = {};
+  state.tiers.forEach((t) => { out[t.id] = av.includes(t) && sum > 0 ? (t.chance / sum) * 100 : 0; });
+  return out;
+}
+// Çekiliş yapılamıyorsa sebebini döndürür
+function drawBlockReason() {
+  if (availableTiers().length) return null;
+  const anyStock = state.tiers.some((t) => t.items && t.items.some((i) => i.stock > 0));
+  return anyStock ? "Çekilebilir ödül yok — olasılıkları kontrol edin" : "Ödüller tükendi";
+}
+
+/* =====================================================================
+   SES — Web Audio API ile üretilir (dosya yok)
+   ===================================================================== */
+const Sound = (() => {
+  let ctx = null, master = null, brass = null, noiseBuf = null;
+  const N = { G4: 392, C5: 523.25, E5: 659.25, G5: 783.99, A5: 880, B5: 987.77,
+              C6: 1046.5, D6: 1174.66, E6: 1318.5, G6: 1567.98, C7: 2093 };
+
+  function ensure() {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.7;
+      master.connect(ctx.destination);
+      // Fanfar için "bakır" filtre hattı
+      brass = ctx.createBiquadFilter();
+      brass.type = "lowpass";
+      brass.frequency.value = 2400;
+      brass.connect(master);
+      // 1 saniyelik beyaz gürültü
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  }
+  const on = () => !state.muted && ensure();
+
+  function tone(f, t0, dur, { type = "sine", vol = 0.25, attack = 0.006, slideTo = null, out = null } = {}) {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f, t0);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g);
+    g.connect(out || master);
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
+  }
+  function noise(t0, dur, { vol = 0.2, from = 600, to = 3000, q = 1.2 } = {}) {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    const f = ctx.createBiquadFilter();
+    f.type = "bandpass";
+    f.Q.value = q;
+    f.frequency.setValueAtTime(from, t0);
+    f.frequency.exponentialRampToValueAtTime(to, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + dur * 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+  }
+
+  return {
+    unlock() { ensure(); },
+    // Gerilim: giderek hızlanan ve tizleşen tık sesleri
+    shake(totalMs) {
+      if (!on()) return;
+      const now = ctx.currentTime;
+      let t = 0, gap = 0.22, f = 650;
+      while (t < totalMs / 1000 - 0.03) {
+        tone(f, now + t, 0.045, { type: "square", vol: 0.1 });
+        t += gap;
+        gap = Math.max(0.045, gap * 0.8);
+        f *= 1.05;
+      }
+    },
+    pop() { if (on()) tone(200, ctx.currentTime, 0.14, { slideTo: 520, vol: 0.35 }); },
+    whoosh() { if (on()) noise(ctx.currentTime, 0.5, { from: 300, to: 2600, vol: 0.25 }); },
+    flip() { if (on()) noise(ctx.currentTime, 0.16, { from: 1500, to: 5000, vol: 0.18, q: 2 }); },
+    // Küçük ödül: kısa "ding"
+    ding() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      tone(N.E6, t, 0.9, { vol: 0.3 });
+      tone(N.E6 * 2, t, 0.45, { vol: 0.06 });
+      tone(N.B5, t + 0.1, 0.8, { vol: 0.15 });
+    },
+    // Orta ödül: hızlı arpej
+    medium() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      [N.C6, N.E6, N.G6].forEach((f, i) => tone(f, t + i * 0.09, 0.5, { type: "triangle", vol: 0.22 }));
+      tone(N.C7, t + 0.27, 0.9, { vol: 0.12 });
+    },
+    // Büyük ödül: daha uzun melodi
+    big() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      const mel = [[N.C5, 0, 0.16], [N.E5, 0.16, 0.16], [N.G5, 0.32, 0.16], [N.C6, 0.48, 0.32],
+                   [N.G5, 0.82, 0.14], [N.C6, 0.98, 0.14], [N.E6, 1.14, 0.7]];
+      mel.forEach(([f, s, d]) => {
+        tone(f, t + s, d + 0.1, { type: "triangle", vol: 0.22 });
+        tone(f * 2, t + s, d, { vol: 0.05 });
+      });
+      [N.C5, N.E5, N.G5, N.C6].forEach((f) => tone(f, t + 1.14, 1.4, { type: "triangle", vol: 0.08 }));
+    },
+    // Altın Bilet: fanfar
+    fanfare() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      const o = { type: "sawtooth", vol: 0.1, out: brass, attack: 0.02 };
+      tone(N.G4, t, 0.13, o);
+      tone(N.G4, t + 0.15, 0.13, o);
+      tone(N.G4, t + 0.3, 0.13, o);
+      tone(N.C5, t + 0.45, 0.45, o);
+      tone(N.G4, t + 0.95, 0.15, o);
+      [N.C5, N.E5, N.G5, N.C6].forEach((f) => tone(f, t + 1.12, 1.1, { ...o, vol: 0.07 }));
+      for (let i = 0; i < 10; i++) tone(N.C7 * (1 + rand() * 0.5), t + 1.1 + i * 0.07, 0.25, { vol: 0.04 });
+    },
+    reelTick() { if (on()) tone(1500, ctx.currentTime, 0.03, { type: "square", vol: 0.06 }); },
+    goldWin() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      [N.C6, N.E6, N.G6, N.C7].forEach((f, i) => tone(f, t + i * 0.07, 0.6, { type: "triangle", vol: 0.2 }));
+      [N.C5, N.E5, N.G5].forEach((f) => tone(f, t + 0.3, 1.2, { type: "sawtooth", vol: 0.05, out: brass }));
+      for (let i = 0; i < 14; i++) tone(N.C7 * (1 + rand()), t + 0.3 + i * 0.06, 0.2, { vol: 0.03 });
+    },
+    undo() {
+      if (!on()) return;
+      const t = ctx.currentTime;
+      tone(660, t, 0.12, { type: "triangle", vol: 0.2 });
+      tone(440, t + 0.12, 0.22, { type: "triangle", vol: 0.2 });
+    }
+  };
+})();
+
+/* =====================================================================
+   KONFETİ — canvas ile çizilir
+   ===================================================================== */
+const Confetti = (() => {
+  const cv = $("#confetti");
+  const cx = cv.getContext("2d");
+  let parts = [], running = false, W = 0, H = 0;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W * dpr;
+    cv.height = H * dpr;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  function add(p) {
+    if (parts.length < 1600) parts.push(p);
+  }
+  function makePart(x, y, vx, vy, colors, g) {
+    return {
+      x, y, vx, vy, g,
+      w: 6 + rand() * 8, h: 4 + rand() * 6,
+      rot: rand() * 6.28, vr: (rand() - 0.5) * 0.35,
+      tilt: rand() * 6.28, vt: 0.05 + rand() * 0.12,
+      color: colors[Math.floor(rand() * colors.length)],
+      circle: rand() < 0.28
+    };
+  }
+  // Bir noktadan patlama
+  function burst({ x, y, count = 100, colors, angle = -Math.PI / 2, spread = Math.PI * 0.9, power = 15 }) {
+    const scale = Math.max(0.6, Math.min(1.4, H / 850));
+    for (let i = 0; i < count; i++) {
+      const a = angle + (rand() - 0.5) * spread;
+      const v = power * scale * (0.45 + rand() * 0.75);
+      add(makePart(x, y, Math.cos(a) * v, Math.sin(a) * v, colors, 0.32 * scale));
+    }
+    start();
+  }
+  // Üstten yağmur
+  function rain({ count = 200, colors }) {
+    for (let i = 0; i < count; i++) {
+      add(makePart(rand() * W, -10 - rand() * H * 0.9, (rand() - 0.5) * 2, 1.5 + rand() * 3, colors, 0.04));
+    }
+    start();
+  }
+  function start() {
+    if (running) return;
+    running = true;
+    requestAnimationFrame(loop);
+  }
+  function loop() {
+    cx.clearRect(0, 0, W, H);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.vx *= 0.985;
+      p.vy = p.vy * 0.985 + p.g;
+      p.x += p.vx + Math.sin(p.tilt) * 0.6;
+      p.y += p.vy;
+      p.rot += p.vr;
+      p.tilt += p.vt;
+      if (p.y > H + 40 || p.x < -60 || p.x > W + 60) { parts.splice(i, 1); continue; }
+      cx.save();
+      cx.translate(p.x, p.y);
+      cx.rotate(p.rot);
+      cx.scale(1, Math.cos(p.tilt));
+      cx.fillStyle = p.color;
+      if (p.circle) {
+        cx.beginPath();
+        cx.arc(0, 0, p.w / 2.4, 0, Math.PI * 2);
+        cx.fill();
+      } else {
+        cx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      }
+      cx.restore();
+    }
+    if (parts.length) requestAnimationFrame(loop);
+    else { running = false; cx.clearRect(0, 0, W, H); }
+  }
+  return { burst, rain, size: () => ({ W, H }) };
+})();
+
+const GOOGLE_COLORS = ["#4285F4", "#EA4335", "#FBBC05", "#34A853"];
+const GOLD_COLORS = ["#FBBC05", "#FFD54F", "#F9A825", "#FFF176", "#FFE082", "#ffffff"];
+
+/* =====================================================================
+   EKRAN AKIŞI ve ANİMASYONLAR
+   ===================================================================== */
+const el = {
+  body: document.body,
+  stage: $("#stage"),
+  boxWrap: $("#boxWrap"),
+  box: $("#box"),
+  lid: $("#lid"),
+  cardShift: $("#cardShift"),
+  card: $("#card"),
+  cardInner: $("#cardInner"),
+  front: $("#cardFront"),
+  frontTier: $("#frontTier"),
+  frontEmoji: $("#frontEmoji"),
+  frontName: $("#frontName"),
+  reel: $("#reel"),
+  reelViewport: $("#reelViewport"),
+  reelStrip: $("#reelStrip"),
+  tagline: $("#tagline"),
+  announce: $("#announce"),
+  drawBtn: $("#drawBtn"),
+  againBtn: $("#againBtn"),
+  undoBtn: $("#undoBtn"),
+  countdownBar: $("#countdownBar"),
+  goldFlash: $("#goldFlash"),
+  muteBtn: $("#muteBtn")
+};
+
+// phase: idle | drawing | returning | result
+let phase = "idle";
+let autoTimer = null;
+let panelOpen = false;
+
+function setScreen(s) {
+  phase = s;
+  // "returning" görsel olarak sonuç ekranıyla aynı ama giriş kabul etmez
+  el.body.dataset.screen = s === "returning" ? "drawing" : s;
+}
+
+// Web Animations API kısayolu (bitince çözülen promise döndürür)
+function anim(node, frames, opts) {
+  return node.animate(frames, { fill: "forwards", ...opts }).finished;
+}
+// Yalnızca JS ile başlatılmış animasyonları iptal et (CSS animasyonlarına dokunma)
+function cancelJsAnims(node) {
+  node.getAnimations().forEach((a) => {
+    if ("animationName" in a || "transitionProperty" in a) return;
+    a.cancel();
+  });
+}
+function resetVisuals() {
+  [el.boxWrap, el.box, el.lid, el.cardShift, el.card, el.cardInner, el.goldFlash, el.countdownBar].forEach(cancelJsAnims);
+  el.card.classList.remove("glow");
+  el.reel.classList.remove("show");
+  el.reelStrip.style.transform = "";
+  el.announce.textContent = "";
+  el.announce.classList.remove("gold");
+}
+function showBox() {
+  el.boxWrap.classList.add("breathing");
+  el.boxWrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+}
+
+// Kartın ön yüzünü doldur
+function fillFront(tier, item, isGold) {
+  el.card.style.setProperty("--tier", tier.color);
+  el.front.style.setProperty("--tier", tier.color);
+  el.front.className = "face front tier-" + tier.id;
+  if (isGold) {
+    el.frontTier.textContent = "ALTIN BİLET!";
+    el.frontEmoji.textContent = CONFIG.settings.goldTicketEmoji;
+    el.frontName.textContent = "Orta veya büyük ödül garantili!";
+    el.frontName.className = "front-name small";
+  } else {
+    el.frontTier.textContent = upperTR(tier.name);
+    el.frontEmoji.textContent = item.emoji;
+    el.frontName.textContent = item.name;
+    el.frontName.className = "front-name";
+  }
+}
+
+// Kutu sallanma kareleri: genlik artar, salınımlar hızlanır
+function shakeFrames() {
+  const frames = [];
+  const n = 18;
+  for (let i = 0; i <= n; i++) {
+    const p = i / n;
+    const a = i === 0 || i === n ? 0 : (2 + p * 9) * (i % 2 ? 1 : -1);
+    frames.push({
+      offset: Math.pow(p, 0.65),
+      transform: `rotate(${a}deg) translateY(${-Math.abs(a) * 0.5}px)`
+    });
+  }
+  return frames;
+}
+
+function cardCenter() {
+  const r = el.card.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+// ANA ÇEKİLİŞ
+async function startDraw() {
+  if (panelOpen) return;
+  if (phase !== "idle" && phase !== "result") return;   // animasyon sırasında yeni çekiliş yok
+  if (drawBlockReason()) { refreshAvailability(); return; }
+
+  Sound.unlock();
+  clearAutoReturn();
+  const fromResult = phase === "result";
+  setScreen("drawing");                 // kilit: bundan sonra tekrar basmak etkisiz
+
+  const result = commitDraw();          // sonuç animasyondan önce kesinleşir
+  if (!result) { setScreen("idle"); refreshAvailability(); return; }
+
+  try {
+    if (fromResult) {
+      await anim(el.card, [{ opacity: 1 }, { opacity: 0 }], { duration: 220 });
+      resetVisuals();
+      el.boxWrap.classList.remove("breathing");
+      await anim(el.boxWrap, [{ opacity: 0, transform: "scale(.9)" }, { opacity: 1, transform: "scale(1)" }], { duration: 260, fill: "none" });
+    }
+    await playSequence(result);
+  } catch (e) {
+    // Animasyon kesilirse sessizce devam et; sonuç zaten kaydedildi
+  }
+
+  setScreen("result");
+  refreshAvailability();
+  if (drawBlockReason()) toast("Bu son ödüldü — " + drawBlockReason().toLowerCase(), "warn");
+  startAutoReturn();
+}
+
+async function playSequence({ tier, item }) {
+  const T = CONFIG.timing;
+  const isGold = !!tier.poolFrom;
+  fillFront(tier, item, isGold);
+  el.boxWrap.classList.remove("breathing");
+
+  // 1) Kutu sallanır + hızlanan tık sesleri
+  Sound.shake(T.shake);
+  await anim(el.box, shakeFrames(), { duration: T.shake, easing: "linear", fill: "none" });
+
+  // 2) Kapak açılır, ters kart yukarı fırlayıp ortada büyür
+  Sound.pop();
+  Sound.whoosh();
+  anim(el.lid, [
+    { transform: "translate(0,0) rotate(0deg)", opacity: 1 },
+    { transform: "translate(-20%,-170%) rotate(-30deg)", opacity: 0 }
+  ], { duration: T.lid, easing: "cubic-bezier(.3,.7,.4,1)" });
+  anim(el.boxWrap, [
+    { opacity: 1, transform: "translateY(0) scale(1)" },
+    { opacity: 0, transform: "translateY(18%) scale(.85)" }
+  ], { duration: 450, delay: 320, easing: "ease-in" });
+  await anim(el.card, [
+    { transform: "translateY(10%) scale(.16)", opacity: 0 },
+    { transform: "translateY(-4%) scale(.3)", opacity: 1, offset: 0.15 },
+    { transform: "translateY(-38%) scale(.62)", offset: 0.55 },
+    { transform: "translateY(3%) scale(1.04)", offset: 0.85 },
+    { transform: "translateY(0) scale(1)", opacity: 1 }
+  ], { duration: T.fly, easing: "cubic-bezier(.25,.8,.35,1)" });
+  await wait(160);
+
+  // 3) Kart 3D döner, ön yüz açılır
+  Sound.flip();
+  await anim(el.cardInner, [
+    { transform: "rotateY(0deg)" },
+    { transform: "rotateY(196deg)", offset: 0.8 },
+    { transform: "rotateY(180deg)" }
+  ], { duration: T.flip, easing: "cubic-bezier(.5,0,.3,1)" });
+  el.card.classList.add("glow");
+
+  // 4) Türe göre efekt
+  const c = cardCenter();
+  const { W, H } = Confetti.size();
+  if (isGold) {
+    await goldSequence(item);
+    return;
+  }
+  el.announce.textContent = `Tebrikler! ${item.emoji} ${item.name} kazandın!`;
+  if (tier.id === "kucuk") {
+    Sound.ding();
+  } else if (tier.id === "orta") {
+    Sound.medium();
+    Confetti.burst({ x: c.x, y: c.y, count: 90, colors: GOOGLE_COLORS, spread: Math.PI * 0.8, power: 13 });
+  } else {
+    // Büyük ödül (ve CONFIG'e eklenebilecek diğer türler): bol konfeti + uzun melodi
+    Sound.big();
+    Confetti.burst({ x: c.x, y: c.y, count: 170, colors: GOOGLE_COLORS, power: 17 });
+    await wait(250);
+    Confetti.burst({ x: 0, y: H, count: 130, colors: GOOGLE_COLORS, angle: -Math.PI / 3, spread: 0.7, power: 22 });
+    Confetti.burst({ x: W, y: H, count: 130, colors: GOOGLE_COLORS, angle: -Math.PI * 2 / 3, spread: 0.7, power: 22 });
+    await wait(400);
+    Confetti.burst({ x: c.x, y: c.y, count: 120, colors: GOOGLE_COLORS, power: 15 });
+  }
+}
+
+// ALTIN BİLET özel animasyonu
+async function goldSequence(item) {
+  const T = CONFIG.timing;
+  const c = cardCenter();
+  // Altın ışıltı + fanfar
+  Sound.fanfare();
+  el.goldFlash.animate([{ opacity: 0 }, { opacity: 1, offset: 0.25 }, { opacity: 0 }], { duration: 1300, easing: "ease-out" });
+  Confetti.burst({ x: c.x, y: c.y, count: 70, colors: GOLD_COLORS, power: 12 });
+  await wait(T.goldPause);
+
+  // Kart küçülüp yukarı kayar, altında rulet şeridi belirir
+  await anim(el.cardShift, [{ transform: "none" }, { transform: "translateY(-14%) scale(.72)" }], { duration: 500, easing: "ease-in-out" });
+  el.announce.textContent = "Ödülün belirleniyor…";
+  el.announce.classList.add("gold");
+  await spinReel(item);
+
+  // Kazanılan ödül
+  Sound.goldWin();
+  el.frontEmoji.textContent = item.emoji;
+  el.frontName.textContent = item.name;
+  el.frontName.className = "front-name";
+  el.frontEmoji.animate([{ transform: "scale(.4)" }, { transform: "scale(1.25)" }, { transform: "scale(1)" }], { duration: 500, easing: "ease-out" });
+  el.announce.textContent = `🎉 ${item.emoji} ${upperTR(item.name)} KAZANDIN! 🎉`;
+  el.announce.animate([{ transform: "scale(.6)", opacity: 0 }, { transform: "scale(1.1)", opacity: 1 }, { transform: "scale(1)" }], { duration: 500, easing: "ease-out" });
+  el.goldFlash.animate([{ opacity: 0 }, { opacity: 0.7, offset: 0.2 }, { opacity: 0 }], { duration: 1000 });
+  const { W, H } = Confetti.size();
+  Confetti.rain({ count: 260, colors: GOLD_COLORS });
+  Confetti.burst({ x: 0, y: H, count: 110, colors: GOLD_COLORS, angle: -Math.PI / 3, spread: 0.7, power: 22 });
+  Confetti.burst({ x: W, y: H, count: 110, colors: GOLD_COLORS, angle: -Math.PI * 2 / 3, spread: 0.7, power: 22 });
+}
+
+// Slot şeridi: ikonlar hızla geçer, yavaşlar ve kazanılan ödülde durur
+function spinReel(target) {
+  const goldTier = state.tiers.find((t) => t.poolFrom);
+  let pool = goldTier ? tierItems(goldTier) : [];
+  const inStock = pool.filter((i) => i.stock > 0);
+  if (inStock.length) pool = inStock;
+  if (!pool.some((i) => i.id === target.id)) pool = pool.concat([target]);
+
+  const count = 44;
+  const targetIndex = count - 5;
+  const seq = [];
+  for (let i = 0; i < count; i++) {
+    let it = pool[Math.floor(rand() * pool.length)];
+    // Arka arkaya aynı ikon gelmesin (çeşitlilik için)
+    if (pool.length > 1 && seq.length && seq[seq.length - 1].id === it.id) {
+      it = pool[(pool.indexOf(it) + 1) % pool.length];
+    }
+    seq.push(it);
+  }
+  seq[targetIndex] = target;
+  el.reelStrip.innerHTML = seq.map((it) =>
+    `<div class="reel-cell"><span class="e">${escapeHtml(it.emoji)}</span><span class="n">${escapeHtml(it.name)}</span></div>`
+  ).join("");
+  el.reel.classList.add("show");
+
+  const cells = el.reelStrip.children;
+  const cellW = cells[0].getBoundingClientRect().width;
+  const viewW = el.reelViewport.getBoundingClientRect().width;
+  const jitter = (rand() - 0.5) * cellW * 0.4;          // tam ortada durmasın, gerçekçi olsun
+  const endX = targetIndex * cellW + cellW / 2 - viewW / 2 + jitter;
+  const duration = CONFIG.timing.reel;
+  const ease = (p) => 1 - Math.pow(1 - p, 4);            // yavaşlayarak durma
+
+  return new Promise((resolve) => {
+    let startT = null;
+    let lastIdx = -1;
+    function frame(now) {
+      if (startT === null) startT = now;
+      const p = Math.min(1, (now - startT) / duration);
+      const x = endX * ease(p);
+      el.reelStrip.style.transform = `translateX(${-x}px)`;
+      const idx = Math.floor((x + viewW / 2) / cellW);
+      if (idx !== lastIdx) { lastIdx = idx; Sound.reelTick(); }
+      if (p < 1) requestAnimationFrame(frame);
+      else {
+        cells[targetIndex].classList.add("win");
+        resolve();
+      }
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// Sonuç ekranından bekleme ekranına dönüş
+async function goIdle() {
+  clearAutoReturn();
+  if (phase !== "result") return;
+  setScreen("returning");
+  try {
+    await anim(el.card, [{ opacity: 1 }, { opacity: 0, transform: "scale(.9)" }], { duration: 260 });
+  } catch (e) { /* yoksay */ }
+  resetVisuals();
+  showBox();
+  setScreen("idle");
+  refreshAvailability();
+}
+function startAutoReturn() {
+  const ms = CONFIG.settings.autoReturnSeconds * 1000;
+  cancelJsAnims(el.countdownBar);
+  el.countdownBar.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: ms, easing: "linear", fill: "forwards" });
+  autoTimer = setTimeout(goIdle, ms);
+}
+function clearAutoReturn() {
+  if (autoTimer) clearTimeout(autoTimer);
+  autoTimer = null;
+}
+
+// Geri al
+function doUndo() {
+  if (panelOpen) return;
+  if (phase === "drawing" || phase === "returning") return;
+  if (!state.undoable || !state.history.length) {
+    toast("Geri alınacak çekiliş yok");
+    return;
+  }
+  const r = undoLast();
+  Sound.unlock();
+  Sound.undo();
+  toast(r.restored
+    ? `↩ Son çekiliş geri alındı: ${r.rec.emoji} ${r.rec.itemName} (stok geri yüklendi)`
+    : `↩ Son çekiliş geri alındı (ödül listeden silinmiş, stok güncellenemedi)`);
+  if (phase === "result") goIdle();
+  else refreshAvailability();
+}
+
+// Butonların aktif/pasif durumu ve "Ödüller tükendi" mesajı
+function refreshAvailability() {
+  const reason = drawBlockReason();
+  el.drawBtn.disabled = !!reason;
+  el.againBtn.disabled = !!reason;
+  el.undoBtn.disabled = !(state.undoable && state.history.length);
+  el.tagline.textContent = reason || CONFIG.settings.tagline;
+  el.tagline.classList.toggle("empty", !!reason);
+}
+
+/* ---------- Bildirim ---------- */
+function toast(msg, type = "") {
+  const t = document.createElement("div");
+  t.className = "toast " + type;
+  t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => {
+    t.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }).finished.then(() => t.remove());
+  }, 2600);
+}
+
+/* ---------- Ses ve tam ekran ---------- */
+function updateMuteIcon() {
+  el.muteBtn.textContent = state.muted ? "🔇" : "🔊";
+}
+function toggleMute() {
+  state.muted = !state.muted;
+  saveState();
+  updateMuteIcon();
+  toast(state.muted ? "🔇 Ses kapalı" : "🔊 Ses açık");
+}
+function toggleFullscreen() {
+  const d = document;
+  const isFs = d.fullscreenElement || d.webkitFullscreenElement;
+  try {
+    if (!isFs) {
+      const r = d.documentElement;
+      (r.requestFullscreen || r.webkitRequestFullscreen).call(r);
+    } else {
+      (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    }
+  } catch (e) { /* tam ekran desteklenmiyor */ }
+}
+
+/* =====================================================================
+   YÖNETİCİ PANELİ
+   ===================================================================== */
+function openAdmin() {
+  panelOpen = true;
+  el.body.classList.add("admin-open");
+  renderAdmin();
+}
+function closeAdmin() {
+  if (!panelOpen) return;
+  // Toplam 100 değilse kaydederken (kapatırken) 100'e normalize et
+  if (Math.abs(chanceSum() - 100) > 0.01) normalizeChances(true);
+  panelOpen = false;
+  el.body.classList.remove("admin-open");
+  if (document.activeElement) document.activeElement.blur();
+  refreshAvailability();
+}
+function toggleAdmin() { panelOpen ? closeAdmin() : openAdmin(); }
+
+function renderAdmin() {
+  $("#lowThr").textContent = CONFIG.settings.lowStockThreshold;
+  $("#simN").textContent = CONFIG.settings.simulationCount;
+  renderStock();
+  renderChances();
+  renderStats();
+  renderHistory();
+}
+
+/* --- Stok yönetimi --- */
+function rowStatus(item) {
+  if (item.stock <= 0) return "out";
+  if (item.stock <= CONFIG.settings.lowStockThreshold) return "low";
+  return "";
+}
+function renderStock() {
+  let html = "";
+  state.tiers.forEach((tier) => {
+    if (tier.poolFrom) {
+      const names = tier.poolFrom.map((id) => getTier(id) ? getTier(id).name : id).join(" + ");
+      html += `<div class="tier-block" style="--tier:${tier.color}">
+        <div class="tier-head"><span class="dot"></span>${escapeHtml(tier.name)}
+        <span class="tier-total" id="total-${tier.id}"></span></div>
+        <p class="note">Kendi ödülü yok; ${escapeHtml(names)} ödüllerinden stoğa göre seçer.</p></div>`;
+      return;
+    }
+    html += `<div class="tier-block" style="--tier:${tier.color}">
+      <div class="tier-head"><span class="dot"></span>${escapeHtml(tier.name)}
+      <span class="tier-total" id="total-${tier.id}"></span></div>`;
+    tier.items.forEach((it) => {
+      html += `<div class="item-row ${rowStatus(it)}" data-id="${escapeHtml(it.id)}">
+        <input class="emoji-in" value="${escapeHtml(it.emoji)}" title="Emoji">
+        <input class="name-in" value="${escapeHtml(it.name)}" title="Ödül adı">
+        <button data-act="dec" title="Stok -1">−1</button>
+        <input class="stock-in" type="number" min="0" step="1" value="${it.stock}" title="Kalan stok">
+        <button data-act="inc" title="Stok +1">+1</button>
+        <button data-act="del" title="Ödülü sil">🗑</button>
+      </div>`;
+    });
+    html += `<button class="abtn add-item" data-act="add" data-tier="${tier.id}">+ Ödül ekle</button></div>`;
+  });
+  $("#stockList").innerHTML = html;
+  updateTierTotals();
+}
+function updateTierTotals() {
+  state.tiers.forEach((t) => {
+    const node = document.getElementById("total-" + t.id);
+    if (!node) return;
+    const total = tierItems(t).reduce((s, i) => s + i.stock, 0);
+    node.textContent = total > 0 ? `kalan: ${total}` : "TÜKENDİ — çekilişe girmez";
+    node.classList.toggle("out", total <= 0);
+  });
+}
+function afterStockChange(row, item) {
+  saveState();
+  if (row) {
+    row.classList.remove("low", "out");
+    const st = rowStatus(item);
+    if (st) row.classList.add(st);
+  }
+  updateTierTotals();
+  updateEffective();
+  refreshAvailability();
+}
+
+$("#stockList").addEventListener("input", (e) => {
+  const row = e.target.closest(".item-row");
+  if (!row) return;
+  const item = findItem(row.dataset.id);
+  if (!item) return;
+  if (e.target.classList.contains("name-in")) { item.name = e.target.value; saveState(); }
+  else if (e.target.classList.contains("emoji-in")) { item.emoji = e.target.value; saveState(); }
+  else if (e.target.classList.contains("stock-in")) {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isFinite(v) && v >= 0) { item.stock = v; afterStockChange(row, item); }
+  }
+});
+$("#stockList").addEventListener("change", (e) => {
+  const row = e.target.closest(".item-row");
+  if (!row) return;
+  const item = findItem(row.dataset.id);
+  if (!item) return;
+  if (e.target.classList.contains("stock-in")) e.target.value = item.stock;   // geçersiz girişi düzelt
+  if (e.target.classList.contains("name-in") && !item.name.trim()) {
+    item.name = "İsimsiz ödül"; e.target.value = item.name; saveState();
+  }
+  if (e.target.classList.contains("emoji-in") && !item.emoji.trim()) {
+    item.emoji = "🎁"; e.target.value = item.emoji; saveState();
+  }
+});
+$("#stockList").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  if (act === "add") {
+    const tier = getTier(btn.dataset.tier);
+    const it = { id: uid(), name: "Yeni ödül", emoji: "🎁", stock: 10 };
+    tier.items.push(it);
+    saveState();
+    renderStock();
+    updateEffective();
+    refreshAvailability();
+    const input = document.querySelector(`.item-row[data-id="${it.id}"] .name-in`);
+    if (input) { input.focus(); input.select(); }
+    return;
+  }
+  const row = btn.closest(".item-row");
+  const item = findItem(row.dataset.id);
+  if (!item) return;
+  if (act === "inc" || act === "dec") {
+    item.stock = Math.max(0, item.stock + (act === "inc" ? 1 : -1));
+    row.querySelector(".stock-in").value = item.stock;
+    afterStockChange(row, item);
+  } else if (act === "del") {
+    if (!confirm(`"${item.name}" ödülü silinsin mi?`)) return;
+    const tier = tierOfItem(item.id);
+    tier.items = tier.items.filter((i) => i.id !== item.id);
+    saveState();
+    renderStock();
+    updateEffective();
+    refreshAvailability();
+  }
+});
+
+/* --- Olasılıklar --- */
+function chanceSum() { return state.tiers.reduce((s, t) => s + t.chance, 0); }
+function renderChances() {
+  $("#chanceList").innerHTML = state.tiers.map((t) => `
+    <div class="chance-row" style="--tier:${t.color}">
+      <span class="dot"></span>
+      <span>${escapeHtml(t.name)}</span>
+      <input class="chance-in" data-id="${t.id}" inputmode="decimal" value="${fmt(t.chance, 4)}">
+      <span>%</span>
+      <span class="eff" id="eff-${t.id}"></span>
+    </div>`).join("");
+  updateChanceSum();
+  updateEffective();
+}
+function updateChanceSum() {
+  const sum = chanceSum();
+  const node = $("#chanceSum");
+  const ok = Math.abs(sum - 100) <= 0.01;
+  node.className = "chance-sum " + (ok ? "ok" : "warn");
+  node.textContent = ok
+    ? `Toplam: %${fmt(sum)} ✓`
+    : `⚠️ Toplam: %${fmt(sum)} — 100 değil! Panel kapatılırken otomatik olarak 100'e normalize edilecek.`;
+}
+function updateEffective() {
+  const eff = effectiveChances();
+  state.tiers.forEach((t) => {
+    const n = document.getElementById("eff-" + t.id);
+    if (n) n.textContent = eff[t.id] > 0 ? `şu an %${fmt(eff[t.id])}` : "şu an çekilişte yok";
+  });
+}
+function normalizeChances(silent) {
+  const sum = chanceSum();
+  if (sum <= 0) { toast("Olasılıkların toplamı 0 olamaz", "warn"); return; }
+  state.tiers.forEach((t) => { t.chance = Math.round((t.chance / sum) * 100 * 10000) / 10000; });
+  saveState();
+  if (panelOpen) renderChances();
+  toast(silent ? "Olasılıklar toplamı 100 olacak şekilde normalize edildi" : "Olasılıklar 100'e normalize edildi");
+}
+$("#chanceList").addEventListener("input", (e) => {
+  if (!e.target.classList.contains("chance-in")) return;
+  const v = parseDecimal(e.target.value);
+  const valid = Number.isFinite(v) && v >= 0;
+  e.target.classList.toggle("invalid", !valid);
+  if (!valid) return;
+  getTier(e.target.dataset.id).chance = v;    // anında kaydedilir
+  saveState();
+  updateChanceSum();
+  updateEffective();
+  refreshAvailability();
+});
+$("#chanceList").addEventListener("change", (e) => {
+  if (!e.target.classList.contains("chance-in")) return;
+  const t = getTier(e.target.dataset.id);
+  e.target.value = fmt(t.chance, 4);
+  e.target.classList.remove("invalid");
+});
+$("#normalizeBtn").addEventListener("click", () => normalizeChances(false));
+
+/* --- Test simülasyonu (stoğu etkilemez) --- */
+function runSimulation() {
+  const n = CONFIG.settings.simulationCount;
+  const before = JSON.stringify(state.tiers);
+  const eff = effectiveChances();
+  const tierCounts = {};
+  const goldItems = {};
+  let goldSmall = 0, outOfStock = 0, done = 0;
+  state.tiers.forEach((t) => { tierCounts[t.id] = 0; });
+
+  for (let i = 0; i < n; i++) {
+    const d = pickDraw();          // pickDraw stoğu değiştirmez
+    if (!d) break;
+    done++;
+    tierCounts[d.tier.id]++;
+    if (d.item.stock <= 0) outOfStock++;
+    if (d.tier.poolFrom) {
+      goldItems[d.item.id] = (goldItems[d.item.id] || 0) + 1;
+      const src = tierOfItem(d.item.id);
+      if (!src || !d.tier.poolFrom.includes(src.id)) goldSmall++;
+    }
+  }
+  const unchanged = JSON.stringify(state.tiers) === before;
+
+  if (!done) {
+    $("#simResult").innerHTML = `<p class="check-bad">Çekilebilir ödül yok, simülasyon yapılamadı.</p>`;
+    return;
+  }
+  let html = `<table class="mini"><tr><th>Kart türü</th><th class="num">Beklenen</th><th class="num">Çıkan</th><th class="num">Oran</th></tr>`;
+  state.tiers.forEach((t) => {
+    html += `<tr><td><span class="dot" style="--tier:${t.color}"></span> ${escapeHtml(t.name)}</td>
+      <td class="num">%${fmt(eff[t.id])}</td>
+      <td class="num">${tierCounts[t.id]}</td>
+      <td class="num">%${fmt((tierCounts[t.id] / done) * 100)}</td></tr>`;
+  });
+  html += `</table>`;
+  const goldTotal = Object.values(goldItems).reduce((a, b) => a + b, 0);
+  if (goldTotal) {
+    const parts = Object.entries(goldItems).map(([id, c]) => {
+      const it = findItem(id);
+      return `${it ? escapeHtml(it.emoji + " " + it.name) : id}: ${c}`;
+    });
+    html += `<p class="note">Altın Bilet'ten çıkanlar (${goldTotal}): ${parts.join(" · ")}</p>`;
+  }
+  html += `<p class="${goldSmall === 0 ? "check-ok" : "check-bad"}">${goldSmall === 0 ? "✓" : "✗"} Altın Bilet'ten küçük ödül: ${goldSmall}</p>`;
+  html += `<p class="${outOfStock === 0 ? "check-ok" : "check-bad"}">${outOfStock === 0 ? "✓" : "✗"} Stoğu biten ödül çıkışı: ${outOfStock}</p>`;
+  html += `<p class="${unchanged ? "check-ok" : "check-bad"}">${unchanged ? "✓" : "✗"} Stoklar değişmedi</p>`;
+  if (done < n) html += `<p class="note">${done} çekiliş yapıldı.</p>`;
+  $("#simResult").innerHTML = html;
+}
+$("#simBtn").addEventListener("click", runSimulation);
+
+/* --- İstatistik --- */
+function isToday(ts) {
+  return new Date(ts).toDateString() === new Date().toDateString();
+}
+function renderStats() {
+  const h = state.history;
+  const today = h.filter((r) => isToday(r.t)).length;
+  const total = h.length;
+  let html = `<div class="stat-cards">
+    <div class="stat-card"><b>${today}</b><span>Bugün çekilen kart</span></div>
+    <div class="stat-card"><b>${total}</b><span>Toplam çekilen kart</span></div></div>`;
+
+  // Kart türlerine göre dağılım
+  html += `<p class="note"><b>Kart türlerine göre dağılım</b></p>`;
+  state.tiers.forEach((t) => {
+    const c = h.filter((r) => r.tier === t.id).length;
+    const pct = total ? (c / total) * 100 : 0;
+    html += `<div class="bar-row" style="--tier:${t.color}"><span>${escapeHtml(t.name)}</span>
+      <div class="bar"><div style="width:${pct}%"></div></div><span class="num">${c} (%${fmt(pct, 1)})</span></div>`;
+  });
+
+  // Ödül bazında verilen adetler
+  const byItem = {};
+  h.forEach((r) => {
+    if (!byItem[r.itemId]) byItem[r.itemId] = { count: 0, gold: 0, name: r.itemName, emoji: r.emoji };
+    byItem[r.itemId].count++;
+    if (getTier(r.tier) && getTier(r.tier).poolFrom) byItem[r.itemId].gold++;
+  });
+  html += `<table class="mini"><tr><th>Ödül</th><th class="num">Verilen</th><th class="num">Altın Bilet'ten</th><th class="num">Kalan stok</th></tr>`;
+  const shown = new Set();
+  state.tiers.forEach((t) => (t.items || []).forEach((it) => {
+    shown.add(it.id);
+    const s = byItem[it.id] || { count: 0, gold: 0 };
+    html += `<tr><td>${escapeHtml(it.emoji)} ${escapeHtml(it.name)}</td><td class="num">${s.count}</td>
+      <td class="num">${s.gold}</td><td class="num">${it.stock}</td></tr>`;
+  }));
+  Object.entries(byItem).forEach(([id, s]) => {
+    if (shown.has(id)) return;
+    html += `<tr><td>${escapeHtml(s.emoji)} ${escapeHtml(s.name)} <i>(silinmiş)</i></td><td class="num">${s.count}</td>
+      <td class="num">${s.gold}</td><td class="num">—</td></tr>`;
+  });
+  html += `</table>`;
+  $("#stats").innerHTML = html;
+}
+
+/* --- Çekiliş geçmişi + CSV --- */
+function timeStr(ts) {
+  return new Date(ts).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function renderHistory() {
+  const list = state.history.slice(-CONFIG.settings.historyListSize).reverse();
+  if (!list.length) {
+    $("#historyList").innerHTML = `<p class="note">Henüz çekiliş yok.</p>`;
+    return;
+  }
+  $("#historyList").innerHTML = `<table class="mini"><tr><th>Saat</th><th>Kart türü</th><th>Ödül</th></tr>` +
+    list.map((r) => {
+      const t = getTier(r.tier);
+      return `<tr><td>${timeStr(r.t)}</td>
+        <td><span class="dot" style="--tier:${t ? t.color : "#999"}"></span> ${escapeHtml(t ? t.name : r.tier)}</td>
+        <td>${escapeHtml(r.emoji)} ${escapeHtml(r.itemName)}</td></tr>`;
+    }).join("") + `</table>`;
+}
+function downloadCsv() {
+  if (!state.history.length) { toast("İndirilecek çekiliş yok"); return; }
+  const esc = (v) => {
+    const s = String(v);
+    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [["Tarih", "Saat", "Kart Türü", "Ödül"].join(";")];
+  state.history.forEach((r) => {
+    const d = new Date(r.t);
+    const t = getTier(r.tier);
+    lines.push([d.toLocaleDateString("tr-TR"), timeStr(r.t), t ? t.name : r.tier, r.itemName].map(esc).join(";"));
+  });
+  // BOM: Excel'in Türkçe karakterleri doğru göstermesi için
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const day = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `debug-kutusu-cekilisler-${day}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("#csvBtn").addEventListener("click", downloadCsv);
+
+/* --- Sıfırlama --- */
+$("#resetStockBtn").addEventListener("click", () => {
+  if (!confirm("Tüm ödüller ve stoklar CONFIG'teki varsayılan değerlere döndürülsün mü?\n(Panelden eklenen ödüller silinir; geçmiş korunur.)")) return;
+  state.tiers.forEach((t) => {
+    if (t.poolFrom) return;
+    const ct = CONFIG.tiers.find((c) => c.id === t.id);
+    t.items = defaultItems(ct);
+  });
+  state.undoable = false;   // eski çekilişin stoğu yeni değerlere eklenmesin
+  saveState();
+  renderAdmin();
+  refreshAvailability();
+  toast("Stoklar varsayılana döndürüldü");
+});
+$("#resetAllBtn").addEventListener("click", () => {
+  if (!confirm("TÜM veriler (stoklar, olasılıklar, istatistik ve geçmiş) silinecek. Emin misiniz?")) return;
+  try { localStorage.removeItem(CONFIG.settings.storageKey); } catch (e) { /* yoksay */ }
+  state = defaultState();
+  saveState();
+  updateMuteIcon();
+  renderAdmin();
+  $("#simResult").innerHTML = "";
+  refreshAvailability();
+  toast("Tüm veriler sıfırlandı");
+});
+
+/* =====================================================================
+   KONTROLLER (klavye, tıklama, dokunma)
+   ===================================================================== */
+function isTyping(t) {
+  return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+}
+document.addEventListener("keydown", (e) => {
+  const k = (e.key || "").toLowerCase();
+
+  // Ctrl+Shift+A: yönetici paneli (her durumda)
+  if (e.ctrlKey && e.shiftKey && (k === "a" || e.code === "KeyA")) {
+    e.preventDefault();
+    toggleAdmin();
+    return;
+  }
+  // Panel açıkken çekiliş kısayolları devre dışı
+  if (panelOpen) {
+    if (e.key === "Escape") closeAdmin();
+    return;
+  }
+  if (isTyping(e.target)) return;
+
+  // Ctrl+Z (Mac'te Cmd+Z): son çekilişi geri al
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (k === "z" || e.code === "KeyZ")) {
+    e.preventDefault();
+    doUndo();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.code === "Space" || e.key === " " || e.key === "Enter") {
+    e.preventDefault();               // odaktaki butonun ikinci kez tetiklenmesini önler
+    if (!e.repeat) startDraw();
+    return;
+  }
+  if (k === "f") { e.preventDefault(); toggleFullscreen(); return; }
+  if (k === "m") { e.preventDefault(); toggleMute(); return; }
+});
+// Boşluk tuşunun keyup'ta butonu "tıklamasını" engelle
+document.addEventListener("keyup", (e) => {
+  if (!panelOpen && (e.code === "Space" || e.key === " ") && e.target.tagName === "BUTTON") e.preventDefault();
+});
+
+// Ekrana tıklama/dokunma = kart çek (butonlar kendi işini yapar)
+el.stage.addEventListener("click", (e) => {
+  if (panelOpen) return;
+  if (e.target.closest("button")) return;
+  startDraw();
+});
+function bindBtn(node, fn) {
+  node.addEventListener("click", (e) => {
+    e.stopPropagation();
+    node.blur();
+    fn();
+  });
+}
+bindBtn(el.drawBtn, startDraw);
+bindBtn(el.againBtn, startDraw);
+bindBtn(el.undoBtn, doUndo);
+bindBtn($("#muteBtn"), toggleMute);
+bindBtn($("#fsBtn"), toggleFullscreen);
+bindBtn($("#adminBtn"), toggleAdmin);
+$("#adminClose").addEventListener("click", closeAdmin);
+$("#backdrop").addEventListener("click", closeAdmin);
+
+/* ---------- Başlangıç ---------- */
+$("#orgTitle").textContent = CONFIG.settings.orgName;
+saveState();          // ilk açılışta varsayılanları kaydet
+updateMuteIcon();
+setScreen("idle");
+refreshAvailability();
+</script>
+</body>
+</html>
